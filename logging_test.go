@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	collectlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func TestNewJSONRedactsSecretsAndAddsService(t *testing.T) {
@@ -92,7 +94,7 @@ func TestNewWithOTelEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error when creating otel logger: %v", err)
 	}
-	logger.Info("hello otel", "access_token", "top-secret", "key", "value")
+	logger.With("access_token", "top-secret").Info("hello otel", "key", "value")
 
 	got := out.String()
 	if !strings.Contains(got, "hello otel") {
@@ -178,6 +180,11 @@ func TestErrorLogLevelIncludesCallerAndStacktrace(t *testing.T) {
 	if !strings.Contains(got, `"stacktrace":`) || !strings.Contains(got, "TestErrorLogLevelIncludesCallerAndStacktrace") {
 		t.Fatalf("expected stacktrace field containing test function in Error log, got %q", got)
 	}
+	for _, internalFrame := range []string{"slogx.captureStacktrace", "slogx.(*callerHandler)"} {
+		if strings.Contains(got, internalFrame) {
+			t.Fatalf("stacktrace contains internal frame %q: %s", internalFrame, got)
+		}
+	}
 }
 
 func TestLoggerEnvField(t *testing.T) {
@@ -217,5 +224,71 @@ func TestGORMLoggerAndRedisHook(t *testing.T) {
 	redisHook := NewRedisHook()
 	if redisHook == nil {
 		t.Fatal("expected non-nil RedisHook")
+	}
+}
+
+func TestRedisHookDoesNotLogCommandArguments(t *testing.T) {
+	var out bytes.Buffer
+	logger, err := New(&out, Config{Level: "info", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
+	slog.SetDefault(logger.Logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	hook := NewRedisHook()
+	process := hook.ProcessHook(func(context.Context, redis.Cmder) error {
+		return context.DeadlineExceeded
+	})
+	cmd := redis.NewCmd(context.Background(), "AUTH", "redis-secret")
+	if err := process(context.Background(), cmd); err == nil {
+		t.Fatal("expected command error")
+	}
+
+	got := out.String()
+	if strings.Contains(got, "redis-secret") || strings.Contains(got, `"args"`) {
+		t.Fatalf("redis command arguments leaked: %s", got)
+	}
+	if !strings.Contains(got, `"cmd":"auth"`) || !strings.Contains(got, `"arg_count":1`) {
+		t.Fatalf("redis safe metadata missing: %s", got)
+	}
+}
+
+func TestGORMLoggerDoesNotLogInterpolatedSQL(t *testing.T) {
+	var out bytes.Buffer
+	logger, err := New(&out, Config{Level: "info", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
+	slog.SetDefault(logger.Logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	gormLog := NewGORMLogger(time.Millisecond).LogMode(gormlogger.Warn)
+	gormLog.Trace(
+		context.Background(),
+		time.Now().Add(-time.Second),
+		func() (string, int64) {
+			return "SELECT * FROM users WHERE password = 'database-secret'", 1
+		},
+		nil,
+	)
+
+	got := out.String()
+	if strings.Contains(got, "database-secret") || strings.Contains(got, `"sql"`) {
+		t.Fatalf("interpolated SQL leaked: %s", got)
+	}
+	if !strings.Contains(got, `"statement":"SELECT"`) || !strings.Contains(got, `"sql_length":`) {
+		t.Fatalf("gorm safe metadata missing: %s", got)
+	}
+}
+
+func TestSQLStatementDoesNotEchoUnknownInput(t *testing.T) {
+	if got := sqlStatement("database-secret is not SQL"); got != "OTHER" {
+		t.Fatalf("sqlStatement() = %q, want OTHER", got)
+	}
+	if got := sqlStatement(" \t\n"); got != "UNKNOWN" {
+		t.Fatalf("sqlStatement() = %q, want UNKNOWN", got)
 	}
 }

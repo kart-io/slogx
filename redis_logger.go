@@ -2,7 +2,6 @@ package slogx
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -12,7 +11,8 @@ import (
 
 type RedisHook struct{}
 
-// NewRedisHook returns a Redis hook that forwards commands and errors to slog.
+// NewRedisHook returns a Redis hook that forwards command metadata and errors to slog.
+// Command arguments are intentionally omitted because they may contain credentials or user data.
 func NewRedisHook() redis.Hook {
 	return &RedisHook{}
 }
@@ -37,13 +37,21 @@ func (h *RedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 			slog.ErrorContext(ctx, "redis command failed",
 				"component", "redis",
 				"cmd", cmd.Name(),
-				"args", fmt.Sprintf("%v", cmd.Args()),
+				"arg_count", redisArgumentCount(cmd),
 				"duration_ms", float64(elapsed.Microseconds())/1000.0,
 				"error", err,
 			)
 		}
 		return err
 	}
+}
+
+func redisArgumentCount(cmd redis.Cmder) int {
+	count := len(cmd.Args()) - 1
+	if count < 0 {
+		return 0
+	}
+	return count
 }
 
 func (h *RedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {

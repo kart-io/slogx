@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	gormlogger "gorm.io/gorm/logger"
@@ -15,7 +16,8 @@ type GORMLogger struct {
 	LogLevel      gormlogger.LogLevel
 }
 
-// NewGORMLogger returns a GORM logger interface that routes SQL logs to slog.
+// NewGORMLogger returns a GORM logger interface that routes query metadata to slog.
+// Interpolated SQL is intentionally omitted because it may contain credentials or user data.
 func NewGORMLogger(slowThreshold time.Duration) gormlogger.Interface {
 	if slowThreshold <= 0 {
 		slowThreshold = 200 * time.Millisecond
@@ -62,7 +64,8 @@ func (l *GORMLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 		"component", "gorm",
 		"duration_ms", float64(elapsed.Microseconds()) / 1000.0,
 		"rows", rows,
-		"sql", sql,
+		"statement", sqlStatement(sql),
+		"sql_length", len(sql),
 	}
 
 	switch {
@@ -74,5 +77,22 @@ func (l *GORMLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 		slog.WarnContext(ctx, fmt.Sprintf("gorm slow query (> %v)", l.SlowThreshold), attrs...)
 	case l.LogLevel >= gormlogger.Info:
 		slog.DebugContext(ctx, "gorm query executed", attrs...)
+	}
+}
+
+func sqlStatement(sql string) string {
+	fields := strings.Fields(sql)
+	if len(fields) == 0 {
+		return "UNKNOWN"
+	}
+	statement := strings.ToUpper(fields[0])
+	switch statement {
+	case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "WITH",
+		"CREATE", "ALTER", "DROP", "TRUNCATE",
+		"BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE",
+		"EXPLAIN", "PRAGMA", "VACUUM", "ANALYZE":
+		return statement
+	default:
+		return "OTHER"
 	}
 }

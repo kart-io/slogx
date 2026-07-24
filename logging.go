@@ -106,6 +106,7 @@ func New(out io.Writer, cfg Config) (*Logger, error) {
 	} else {
 		finalHandler = NewMultiHandler(handlers...)
 	}
+	finalHandler = newRedactingHandler(finalHandler)
 	finalHandler = newTraceHandler(finalHandler)
 	finalHandler = newCallerHandler(finalHandler, cfg.AddSource)
 

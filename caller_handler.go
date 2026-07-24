@@ -51,16 +51,7 @@ func (h *callerHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 	}
 
-	cleanRecord := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
-	r.Attrs(func(a slog.Attr) bool {
-		redacted := redactAttr(nil, a)
-		if redacted.Key != "" {
-			cleanRecord.AddAttrs(redacted)
-		}
-		return true
-	})
-
-	return h.Handler.Handle(ctx, cleanRecord)
+	return h.Handler.Handle(ctx, r)
 }
 
 func captureStacktrace() string {
@@ -77,11 +68,7 @@ func captureStacktrace() string {
 
 	for {
 		frame, more := frames.Next()
-		if frame.Function != "" &&
-			!strings.HasPrefix(frame.Function, "runtime.") &&
-			!strings.HasPrefix(frame.Function, "log/slog.") &&
-			!strings.Contains(frame.Function, "pkg/logging.captureStacktrace") &&
-			!strings.Contains(frame.Function, "pkg/logging.(*callerHandler)") {
+		if frame.Function != "" && !isInternalFrame(frame.Function) {
 			dir, file := filepath.Split(frame.File)
 			parent := filepath.Base(dir)
 			short := file
@@ -95,6 +82,13 @@ func captureStacktrace() string {
 		}
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+func isInternalFrame(name string) bool {
+	return strings.HasPrefix(name, "runtime.") ||
+		strings.HasPrefix(name, "log/slog.") ||
+		strings.Contains(name, "github.com/kart-io/slogx.captureStacktrace") ||
+		strings.Contains(name, "github.com/kart-io/slogx.(*callerHandler)")
 }
 
 func (h *callerHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

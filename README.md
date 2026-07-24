@@ -12,7 +12,8 @@
 - **Error 日志代码诊断**：当为错误日志时，自动生成短路径 `caller`（如 `handlers/article.go:123`）及清洗后的完整 `stacktrace` 堆栈链。
 - **高性能 Pool 缓存**：堆栈格式化采用 `sync.Pool` 对象池减少高并发下 GC 开销。
 - **多路日志并发转发（MultiHandler）**：支持控制台（Stdout）与 远程 VLog 日志同时并行双发。
-- **敏感信息自动脱敏**：内置敏感字段脱敏正则（如 `password`, `token`, `secret`, `authorization`, `api_key` 等）。
+- **敏感信息自动脱敏**：普通属性、分组属性及 `Logger.With` 预绑定属性都会在控制台和 OTLP 输出前递归脱敏；内置敏感字段包括 `password`、`token`、`secret`、`authorization`、`api_key` 等。
+- **数据库安全元数据**：Redis 错误不记录命令参数，GORM 慢查询和错误不记录插值 SQL，只保留命令/语句类型、耗时、数量等诊断元数据。
 - **环境与版本推断**：自动注入 `env` 部署环境属性及 Git Tag / Commit 版本推断。
 
 ---
@@ -196,14 +197,15 @@ func main() {
 
 ## 🔌 常用组件适配接入 (GORM & Redis)
 
-### 1. GORM 数据库慢查询与 SQL 检索接入
+### 1. GORM 数据库慢查询与安全元数据接入
 
 ```go
 import "gorm.io/gorm"
 import "github.com/kart-io/slogx"
 
 db, err := gorm.Open(dialector, &gorm.Config{
-    // 将 SQL 错单、慢查询（> 200ms）自动转换为 slog 并带上 component: gorm
+    // 将查询错误、慢查询（> 200ms）自动转换为 slog 并带上安全诊断元数据。
+    // 为防止凭据和用户数据泄漏，日志不包含插值后的原始 SQL。
     Logger: slogx.NewGORMLogger(200 * time.Millisecond),
 })
 ```
