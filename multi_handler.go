@@ -1,0 +1,56 @@
+package slogx
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+)
+
+type multiHandler struct {
+	handlers []slog.Handler
+}
+
+// NewMultiHandler creates a slog.Handler that dispatches records to multiple handlers.
+func NewMultiHandler(handlers ...slog.Handler) slog.Handler {
+	return &multiHandler{handlers: handlers}
+}
+
+func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *multiHandler) Handle(ctx context.Context, r slog.Record) error {
+	var errs []error
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, r.Level) {
+			if err := h.Handle(ctx, r); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+func (m *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		next[i] = h.WithAttrs(attrs)
+	}
+	return &multiHandler{handlers: next}
+}
+
+func (m *multiHandler) WithGroup(name string) slog.Handler {
+	next := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		next[i] = h.WithGroup(name)
+	}
+	return &multiHandler{handlers: next}
+}
