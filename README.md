@@ -204,8 +204,8 @@ import "gorm.io/gorm"
 import "github.com/kart-io/slogx"
 
 db, err := gorm.Open(dialector, &gorm.Config{
-    // 将查询错误、慢查询（> 200ms）自动转换为 slog 并带上安全诊断元数据。
-    // 为防止凭据和用户数据泄漏，日志不包含插值后的原始 SQL。
+    // 将普通查询、查询错误和慢查询（> 200ms）转换为 slog。
+    // sql 字段包含插值后的完整查询与参数值；请按敏感数据要求控制日志权限和保留期。
     Logger: slogx.NewGORMLogger(200 * time.Millisecond),
 })
 ```

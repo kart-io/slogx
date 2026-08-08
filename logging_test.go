@@ -255,7 +255,7 @@ func TestRedisHookDoesNotLogCommandArguments(t *testing.T) {
 	}
 }
 
-func TestGORMLoggerDoesNotLogInterpolatedSQL(t *testing.T) {
+func TestGORMLoggerLogsSQLWithQueryParameters(t *testing.T) {
 	var out bytes.Buffer
 	logger, err := New(&out, Config{Level: "info", Format: "json"})
 	if err != nil {
@@ -266,21 +266,34 @@ func TestGORMLoggerDoesNotLogInterpolatedSQL(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	gormLog := NewGORMLogger(time.Millisecond).LogMode(gormlogger.Warn)
+	paramsFilter, ok := gormLog.(interface {
+		ParamsFilter(context.Context, string, ...interface{}) (string, []interface{})
+	})
+	if !ok {
+		t.Fatal("GORM logger must implement ParamsFilter")
+	}
+	query, params := paramsFilter.ParamsFilter(
+		context.Background(),
+		"SELECT * FROM users WHERE password = ? AND tenant_id = ?",
+		"database-secret",
+		42,
+	)
+	if len(params) != 2 {
+		t.Fatalf("expected all query parameters, got %#v", params)
+	}
+	query = gormlogger.ExplainSQL(query, nil, "'", params...)
 	gormLog.Trace(
 		context.Background(),
 		time.Now().Add(-time.Second),
 		func() (string, int64) {
-			return "SELECT * FROM users WHERE password = 'database-secret'", 1
+			return query, 1
 		},
 		nil,
 	)
 
 	got := out.String()
-	if strings.Contains(got, "database-secret") || strings.Contains(got, `"sql"`) {
-		t.Fatalf("interpolated SQL leaked: %s", got)
-	}
-	if !strings.Contains(got, `"statement":"SELECT"`) || !strings.Contains(got, `"sql_length":`) {
-		t.Fatalf("gorm safe metadata missing: %s", got)
+	if !strings.Contains(got, `"sql":"SELECT * FROM users WHERE password = 'database-secret' AND tenant_id = 42"`) {
+		t.Fatalf("SQL with query parameters missing: %s", got)
 	}
 }
 

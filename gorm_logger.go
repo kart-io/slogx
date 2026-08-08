@@ -16,8 +16,8 @@ type GORMLogger struct {
 	LogLevel      gormlogger.LogLevel
 }
 
-// NewGORMLogger returns a GORM logger interface that routes query metadata to slog.
-// Interpolated SQL is intentionally omitted because it may contain credentials or user data.
+// NewGORMLogger returns a GORM logger interface that routes complete query SQL
+// and metadata to slog, including interpolated query arguments.
 func NewGORMLogger(slowThreshold time.Duration) gormlogger.Interface {
 	if slowThreshold <= 0 {
 		slowThreshold = 200 * time.Millisecond
@@ -52,6 +52,12 @@ func (l *GORMLogger) Error(ctx context.Context, msg string, data ...interface{})
 	}
 }
 
+// ParamsFilter is called by GORM before it builds the Trace callback. Returning
+// every argument makes the Trace SQL include the complete query values.
+func (l *GORMLogger) ParamsFilter(_ context.Context, sql string, params ...interface{}) (string, []interface{}) {
+	return sql, params
+}
+
 func (l *GORMLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
 	if l.LogLevel <= gormlogger.Silent {
 		return
@@ -65,6 +71,7 @@ func (l *GORMLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 		"duration_ms", float64(elapsed.Microseconds()) / 1000.0,
 		"rows", rows,
 		"statement", sqlStatement(sql),
+		"sql", sql,
 		"sql_length", len(sql),
 	}
 
