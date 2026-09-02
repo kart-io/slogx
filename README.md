@@ -164,7 +164,6 @@ go get go.opentelemetry.io/otel/sdk/log
 package main
 
 import (
-	"log/slog"
 	"os"
 
 	"github.com/kart-io/slogx"
@@ -186,12 +185,28 @@ func main() {
 	}
 	defer cleanup() // 尝试在 5 秒内 Flush；失败会报告到 stderr
 
-	// 直接使用标准 slog 记录日志即可自动发布到控制台与 VLog！
-	slog.Info("Service started successfully", "port", 8080)
-	slog.Warn("Database query warning", "duration_ms", 120)
-	slog.Error("Failed to fetch user", "user_id", 42, "access_token", "top-secret")
+	// 业务代码只需 import slogx：包级函数写到同一个默认 logger，
+	// 无需再 import log/slog。
+	slogx.Info("Service started successfully", "port", 8080)
+	slogx.Warn("Database query warning", "duration_ms", 120)
+	slogx.Error("Failed to fetch user", "user_id", 42, "access_token", "top-secret")
 }
 ```
+
+### 2. 调用面：不再 import log/slog
+
+`slogx` 提供与 `log/slog` 同名的调用面，业务包只依赖 `slogx` 一个日志包：
+
+| 用途 | 写法 |
+|---|---|
+| 写日志 | `slogx.Debug/Info/Warn/Error(msg, kv...)`，`*Context` 变体，`slogx.Log(ctx, level, msg, kv...)` |
+| 属性 | `slogx.String/Int/Int64/Bool/Any/Duration/Time/Group(...)`，类型 `slogx.Attr` |
+| 派生 | `slogx.With(kv...)`、`slogx.WithGroup(name)`，或 `logger.With(...)`（保留 Shutdown 钩子） |
+| 默认 logger | `slogx.Default()` / `slogx.SetDefault(*slogx.Logger)`；接入现成 handler 用 `slogx.FromHandler(h)`，接入现成 `*slog.Logger` 用 `slogx.Wrap(l)` |
+| 类型别名 | `slogx.Handler`、`HandlerOptions`、`Level`、`Record`、`Value`，常量 `LevelDebug/Info/Warn/Error` |
+| 命令行入口 | `slogx.Fatal(msg, kv...)`：error 级别记录后 `os.Exit(1)` |
+
+`slogx.Logger` 内嵌 `*slog.Logger`，需要原生类型的第三方接口直接取 `.Logger`。
 
 ---
 
