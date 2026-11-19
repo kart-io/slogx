@@ -187,6 +187,31 @@ func TestErrorLogLevelIncludesCallerAndStacktrace(t *testing.T) {
 	}
 }
 
+// A record with PC 0 declares that it has no call site, e.g. one built from
+// an event by a library; the stack at Handle time would only show the
+// library's internals.
+func TestErrorRecordWithoutPCOmitsCallerAndStacktrace(t *testing.T) {
+	var out bytes.Buffer
+	logger, err := New(&out, Config{Level: "info", Format: "json", AddSource: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := slog.NewRecord(time.Now(), slog.LevelError, "model_error", 0)
+	if err := logger.Handler().Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"msg":"model_error"`) {
+		t.Fatalf("expected the record to be written, got %q", got)
+	}
+	for _, key := range []string{`"caller":`, `"stacktrace":`, `"source":`} {
+		if strings.Contains(got, key) {
+			t.Fatalf("expected no %s for a record without PC, got %q", key, got)
+		}
+	}
+}
+
 func TestLoggerEnvField(t *testing.T) {
 	var out bytes.Buffer
 	logger, err := New(&out, Config{Level: "info", Format: "json", Env: "staging"})
