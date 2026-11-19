@@ -44,7 +44,9 @@ func (h *callerHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 	}
 
-	if r.Level >= slog.LevelError {
+	// PC 0 means the record has no call site; the stack here would only show
+	// the code that built it.
+	if r.Level >= slog.LevelError && r.PC != 0 {
 		stack := captureStacktrace()
 		if stack != "" {
 			r.AddAttrs(slog.String("stacktrace", stack))
